@@ -88,7 +88,13 @@ python3 -m core.runner --provider openai
 To scan code using a custom AI server:
 
 ```bash
-codescanai --provider custom --host http://localhost --port 5000 --token your_token --directory path/to/your/code
+codescanai --provider custom --host <http://localhost> --port <5000> --token <your_token> --directory <path/to/your/code>
+```
+
+Using locally running [Ollama](https://github.com/ollama/ollama):
+
+```bash
+codescanai --provider custom --model <model_name> --host http://localhost --port 11434 --endpoint /api/generate --directory <path/to/your/code>
 ```
 
 ### Supported arguments
