@@ -1,8 +1,12 @@
 import os
 import subprocess
+import sys
 import unittest
+from types import ModuleType
 from unittest.mock import MagicMock, mock_open, patch
 
+from core.code_scanner.code_scanner import CodeScanner
+from core.runner import display_scan_result, format_as_markdown
 from core.utils.code_summary_extractor import (
     generate_code_summary,
     read_files_and_extract_code_summary,
@@ -31,8 +35,8 @@ class TestUtils(unittest.TestCase):
     def test__isGitRepo__invalid(self, mock_check_output):
         self.assertFalse(is_git_repo(os.path.join("test", "invalid", "repo")))
 
-    @patch("core.utils.file_extractor.Github")
-    def test__getChangedFilesInPr(self, mock_github):
+    def test__getChangedFilesInPr(self):
+        mock_github = MagicMock()
         mock_pr = MagicMock()
         mock_pr.get_files.return_value = [
             MagicMock(filename="file_one.py"),
@@ -42,19 +46,22 @@ class TestUtils(unittest.TestCase):
         mock_repo.get_pull.return_value = mock_pr
         mock_github.return_value.get_repo.return_value = mock_repo
 
-        files = get_changed_files_in_pr("some/repo", 1, "fake_token")
+        github_module = ModuleType("github")
+        github_module.Github = mock_github
+        with patch.dict(sys.modules, {"github": github_module}):
+            files = get_changed_files_in_pr("some/repo", 1, "fake_token")
         self.assertEqual(files, ["file_one.py", "file_two.py"])
 
     @patch("subprocess.check_output")
-    @patch("os.chdir")
     @patch("core.utils.file_extractor.is_git_repo", return_value=True)
-    def test__getChangedFilesInRepo(
-        self, mock_is_git_repo, mock_chdir, mock_check_output
-    ):
+    def test__getChangedFilesInRepo(self, mock_is_git_repo, mock_check_output):
         mock_check_output.return_value = "file_one.py\nfile_two.py\n"
         files = get_changed_files_in_repo(os.path.join("some", "repo"))
         self.assertEqual(files, ["file_one.py", "file_two.py"])
-        mock_chdir.assert_called_once_with(os.path.join("some", "repo"))
+        mock_check_output.assert_called_once_with(
+            ["git", "-C", os.path.join("some", "repo"), "diff", "--name-only"],
+            text=True,
+        )
 
     @patch("core.utils.file_extractor.is_git_repo", return_value=False)
     def test__getChangedFilesInRepo_inValid(self, mock_is_git_repo):
@@ -134,22 +141,26 @@ class TestUtils(unittest.TestCase):
     Provider Creator Tests
     """
 
-    @patch("core.utils.provider_creator.OpenAIProvider")
-    @patch("os.getenv")
-    def test__initOpenAIProvider(self, mock_getenv, mock_openai_provider):
-        mock_getenv.return_value = "test_openai_api_key"
+    @patch("core.utils.provider_creator._get_provider_class")
+    def test__initOpenAIProvider(self, mock_get_provider_class):
+        mock_provider_class = MagicMock()
+        mock_get_provider_class.return_value = mock_provider_class
         init_provider("openai", None)
-        mock_getenv.assert_called_once_with("OPENAI_API_KEY")
+        mock_get_provider_class.assert_called_once_with("openai")
+        mock_provider_class.assert_called_once_with(model="gpt-4o-mini")
 
-    @patch("core.utils.provider_creator.GoogleGeminiAIProvider")
-    @patch("os.getenv")
-    def test__initGoogleGeminiAIProvider(self, mock_getenv, mock_google_client):
-        mock_getenv.return_value = "test_gemini_api_key"
+    @patch("core.utils.provider_creator._get_provider_class")
+    def test__initGoogleGeminiAIProvider(self, mock_get_provider_class):
+        mock_provider_class = MagicMock()
+        mock_get_provider_class.return_value = mock_provider_class
         init_provider("gemini", None)
-        mock_getenv.assert_called_once_with("GEMINI_API_KEY")
+        mock_get_provider_class.assert_called_once_with("gemini")
+        mock_provider_class.assert_called_once_with(model="gemini-pro")
 
-    @patch("core.utils.provider_creator.CustomAIProvider")
-    def test_initialize_client_custom(self, mock_custom_client):
+    @patch("core.utils.provider_creator._get_provider_class")
+    def test_initialize_client_custom(self, mock_get_provider_class):
+        mock_provider_class = MagicMock()
+        mock_get_provider_class.return_value = mock_provider_class
         init_provider(
             "custom",
             "custom-model",
@@ -158,6 +169,77 @@ class TestUtils(unittest.TestCase):
             "custom-token",
             "/api/v1/scan",
         )
+        mock_get_provider_class.assert_called_once_with("custom")
+        mock_provider_class.assert_called_once_with(
+            model="custom-model",
+            host="http://localhost",
+            port=5000,
+            token="custom-token",
+            endpoint="/api/v1/scan",
+        )
+
+    """
+    Runner Tests
+    """
+
+    def test__formatAsMarkdown(self):
+        result = "This is a test result"
+        expected_output = "## Code Security Analysis Results\nThis is a test result"
+        self.assertEqual(format_as_markdown(result), expected_output)
+
+    @patch("builtins.print")
+    @patch("core.runner.display_markdown", None)
+    def test__displayScanResult__fallsBackToPrint(self, mock_print):
+        display_scan_result("scan result")
+        mock_print.assert_called_once_with(
+            "## Code Security Analysis Results\nscan result"
+        )
+
+    """
+    Code Scanner Tests
+    """
+
+    @patch("core.code_scanner.code_scanner.init_provider")
+    @patch("core.code_scanner.code_scanner.read_files_and_extract_code_summary")
+    @patch("os.walk")
+    def test__scanFiles__skipsProviderCallWhenNoReadableFiles(
+        self, mock_walk, mock_read_files, mock_init_provider
+    ):
+        mock_walk.return_value = [("repo", (), ("binary.dat",))]
+        mock_read_files.return_value = "   "
+        mock_provider = MagicMock()
+        mock_init_provider.return_value = mock_provider
+        mock_args = MagicMock(changes_only=False, directory=".", repo=None, pr_number=None)
+
+        scan_result = CodeScanner(args=mock_args).scan()
+
+        self.assertEqual(scan_result, "No readable files found in the specified directory.")
+        mock_provider.scan_code.assert_not_called()
+
+    @patch("core.code_scanner.code_scanner.get_changed_files_in_pr")
+    @patch("core.code_scanner.code_scanner.generate_code_summary")
+    @patch("core.code_scanner.code_scanner.init_provider")
+    def test__scanChanges__skipsProviderCallWhenChangedFilesAreUnreadable(
+        self, mock_init_provider, mock_generate_summary, mock_get_changed_files_in_pr
+    ):
+        mock_get_changed_files_in_pr.return_value = ["binary.dat"]
+        mock_generate_summary.return_value = ""
+        mock_provider = MagicMock()
+        mock_init_provider.return_value = mock_provider
+        mock_args = MagicMock(
+            changes_only=True,
+            directory=".",
+            repo="owner/repo",
+            pr_number=1,
+            github_token="token",
+        )
+
+        scan_result = CodeScanner(args=mock_args).scan()
+
+        self.assertEqual(
+            scan_result, "No readable source files found in the detected changes."
+        )
+        mock_provider.scan_code.assert_not_called()
 
 
 if __name__ == "__main__":

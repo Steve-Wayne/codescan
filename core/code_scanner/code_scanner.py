@@ -58,6 +58,9 @@ class CodeScanner:
             return "No changes detected in the directory."
 
         code_summary = generate_code_summary(self.args.directory, changed_files)
+        if not code_summary.strip():
+            logging.info("No readable source files found in the detected changes.")
+            return "No readable source files found in the detected changes."
 
         return self.provider.scan_code(code_summary)
 
@@ -71,10 +74,14 @@ class CodeScanner:
                 file_paths.append(os.path.join(root, file))
 
         code_summary = read_files_and_extract_code_summary(file_paths)
+        if not code_summary.strip():
+            logging.info("No readable files found in the specified directory.")
+            return "No readable files found in the specified directory."
+
         return self.provider.scan_code(code_summary)
 
     def _is_repo_valid(self):
-        return len(self.args.repo) > 0
+        return bool(getattr(self.args, "repo", ""))
 
     def _is_pr_number_valid(self):
-        return self.args.pr_number > 0
+        return getattr(self.args, "pr_number", 0) > 0
