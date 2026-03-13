@@ -2,7 +2,10 @@
 This is the runner of the codescan-ai CLI tool.
 """
 
-from IPython.display import display_markdown
+try:
+    from IPython.display import display_markdown
+except ImportError:  # pragma: no cover - exercised via fallback behavior
+    display_markdown = None
 
 from core.code_scanner.code_scanner import CodeScanner
 from core.utils.argument_parser import parse_arguments
@@ -17,6 +20,17 @@ def format_as_markdown(result):
     return output
 
 
+def display_scan_result(result):
+    """
+    Displays the scan result in notebook environments and falls back to stdout for CLI use.
+    """
+    formatted_result = format_as_markdown(result)
+    if display_markdown is not None:
+        display_markdown(formatted_result)
+        return
+    print(formatted_result)
+
+
 def main():
     """
     Main entry point for the CLI. Parses arguments, calls the centralized CodeScanner
@@ -25,7 +39,7 @@ def main():
     """
     args = parse_arguments()
     scan_result = CodeScanner(args).scan()
-    display_markdown(format_as_markdown(scan_result))
+    display_scan_result(scan_result)
 
 
 if __name__ == "__main__":

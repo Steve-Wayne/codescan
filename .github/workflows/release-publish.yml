@@ -22,6 +22,8 @@ jobs:
 
   publish-to-testpypi:
     needs: release
+    permissions:
+      contents: read # Explicitly set minimal permissions
     runs-on: ubuntu-latest
     if: ${{ needs.release.outputs.release_created }}
     steps:
@@ -56,6 +58,8 @@ jobs:
 
   publish-to-pypi:
     needs: publish-to-testpypi
+    permissions:
+      contents: read # Explicitly set minimal permissions
     runs-on: ubuntu-latest
     if: ${{ needs.publish-to-testpypi.result == 'success' }}
     steps:

@@ -5,10 +5,7 @@ or GitHub pull requests.
 """
 
 import logging
-import os
 import subprocess
-
-from github import Github
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -53,6 +50,13 @@ def get_changed_files_in_pr(repo_name, pr_number, github_token):
         logging.error("GitHub token is required for scanning PR changes.")
         raise ValueError("GitHub token is required for scanning PR changes.")
 
+    try:
+        from github import Github
+    except ImportError as exc:
+        raise ImportError(
+            "PyGithub is required for scanning pull request changes."
+        ) from exc
+
     files = Github(github_token).get_repo(repo_name).get_pull(pr_number).get_files()
 
     changed_files = [file.filename for file in files]
@@ -81,8 +85,9 @@ def get_changed_files_in_repo(directory):
 
     changed_files = []
     try:
-        os.chdir(directory)
-        result = subprocess.check_output(["git", "diff", "--name-only"], text=True)
+        result = subprocess.check_output(
+            ["git", "-C", directory, "diff", "--name-only"], text=True
+        )
         if result.strip():
             changed_files = result.strip().split("\n")
             logging.info(
